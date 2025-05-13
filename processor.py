@@ -1,4 +1,5 @@
 import random
+import time
 
 def process_markers(markers, grid_geojson, point_geojson):
     # Use GeoJSONs however needed (e.g., loop through features)
@@ -8,6 +9,8 @@ def process_markers(markers, grid_geojson, point_geojson):
     for feature in point_geojson.get("features", []):
         feature["properties"]["station_id"] = 5
 
+    time.sleep(5)
+    
     # Processed marker coords
     processed_coords = [(lat + random.uniform(-0.01, 0.01), lon + random.uniform(-0.01, 0.01)) for lat, lon in markers]
 

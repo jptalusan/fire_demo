@@ -36,11 +36,22 @@ point_to_layer = assign("""function(feature, latlng, context){
 grid_style_handle = assign("""function(feature, context) {
     const id = feature.properties.station_id;
     const colorMap = context.hideout.colorMap;
+
+    // If station_id is -1, remove the fill color and opacity
+    if (id === -1) {
+        return {
+            color: "#333",    // Outline color
+            weight: 0.5,       // Outline weight
+            fillOpacity: 0     // No fill
+        };
+    }
+
+    // If station_id is not -1, use the color map
     return {
-        color: "#333",
-        weight: 0.5,
+        color: "#333",                   // Outline color
+        weight: 0.5,                      // Outline weight
         fillColor: colorMap[id] || "#999999",  // fallback color
-        fillOpacity: 0.5
+        fillOpacity: 0.5                  // Fill opacity
     };
 }""")
 
@@ -52,45 +63,81 @@ app.layout = html.Div(style={'height': '100vh', 'display': 'flex', 'flexDirectio
         html.Div(style={'flex': '2', 'border': '1px solid #ccc', 'position': 'relative'}, children=[
             dl.Map(id="map", center=[36.174465, -86.767960], zoom=12,
                    style={'height': '100%', 'width': '100%'}, children=[
-                       dl.TileLayer(),
-                       dl.LayerGroup(id="data-layers", children=[
+                       dl.LayersControl(id="layer-control", position="topright", children=[
+                           dl.BaseLayer(
+                                dl.TileLayer(
+                                    # url="https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png",
+                                    url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+                                    attribution="©OpenStreetMap ©CartoDB",
+                                    id="carto-nolabels",
+                                    maxZoom=20
+                                ),
+                                name="Dark Map",
+                                checked=False,
+                           ),
+                           dl.BaseLayer(
+                                dl.TileLayer(),
+                                name="Base Map",
+                                checked=True,
+                           ),
+                        dl.Overlay(
                             dl.GeoJSON(id="grid-layer", 
-                                       options=dict(
+                                    options=dict(
                                         #    style=dict(color="blue", weight=0.25, fillOpacity=0.1)
                                             style=grid_style_handle,
-                                           ),
+                                        ),
                                         hideout=dict(colorMap=color_map),
                                         zoomToBounds=True,
-                                       ),
+                                    ),
+                                name="Grid Layer",
+                                checked=True,
+                        ),
+                        dl.Overlay(
                             dl.GeoJSON(id="point-layer", 
-                                       zoomToBounds=True, 
-                                       options=dict(pointToLayer=point_to_layer),
-                                       hideout=dict(
-                                           circleOptions=dict(
-                                               radius=5,
-                                               fillColor='red',
-                                               fillOpacity=1,
-                                               stroke=False,
-                                           ),
+                                    zoomToBounds=True, 
+                                    options=dict(pointToLayer=point_to_layer),
+                                    hideout=dict(
+                                        circleOptions=dict(
+                                            radius=5,
+                                            fillColor='red',
+                                            fillOpacity=1,
+                                            stroke=False,
+                                        ),
                                             color_map=color_map,
-                                       )
+                                    )
                             ),
+                            name="Incidents Layer",
+                            checked=True,
+                        ),
+                        dl.Overlay(
                             dl.GeoJSON(id="station-layer",
-                                       zoomToBounds=True,
-                                       options=dict(
-                                           style=dict(color="blue", weight=0.25, fillOpacity=0.1)
-                                       ),
-                                       hideout=dict(colorMap=color_map),
-                            )
+                                    zoomToBounds=True,
+                                    options=dict(
+                                        style=dict(color="blue", weight=0.25, fillOpacity=0.1)
+                                    ),
+                                    hideout=dict(colorMap=color_map),
+                            ),
+                            name="Stations Layer",
+                            checked=True,
+                        ),
+                        dl.Overlay(
+                            dl.LayerGroup(id="drawn-marker-layer"),
+                            name="Drawn Markers",
+                            checked=True,
+                        ),
+                        dl.Overlay(
+                            dl.FeatureGroup([
+                                dl.EditControl(
+                                    id="draw-control",
+                                    draw={"marker": True, "polyline": False, "polygon": False,
+                                            "circle": False, "rectangle": False, "circlemarker": False},
+                                    edit=False
+                                )
+                            ]),
+                            name="Draw Control",
+                            checked=True,
+                        )
                         ]),
-                       dl.FeatureGroup([
-                           dl.EditControl(
-                               id="draw-control",
-                               draw={"marker": True, "polyline": False, "polygon": False,
-                                     "circle": False, "rectangle": False, "circlemarker": False},
-                               edit=False
-                           )
-                       ]),
                    ])
         ]),
 
@@ -98,11 +145,23 @@ app.layout = html.Div(style={'height': '100vh', 'display': 'flex', 'flexDirectio
         html.Div(style={'flex': '1', 'display': 'flex', 'flexDirection': 'column'}, children=[
             # Top Plot (will show processed points)
             html.Div(style={'flex': '1', 'border': '1px solid #ccc'}, children=[
-                dcc.Graph(id='top-plot', figure=initial_fig)
+                dcc.Loading(
+                    id="loading-top",
+                    type="default",
+                    children=[
+                        dcc.Graph(id='top-plot', figure=initial_fig)
+                    ]
+                )
             ]),
             # Bottom Plot (static)
             html.Div(style={'flex': '1', 'border': '1px solid #ccc'}, children=[
-                dcc.Graph(id='bottom-plot', figure=px.scatter(px.data.iris(), x="petal_width", y="petal_length"))
+                dcc.Loading(
+                    id="loading-bottom",
+                    type="default",
+                    children=[
+                        dcc.Graph(id='bottom-plot', figure=initial_fig)
+                    ]
+                )
             ])
         ])
     ]),
@@ -159,7 +218,6 @@ def update_marker_store(geojson):
 )
 def process_and_plot(process_btn, load_btn, markers, grid_data, point_data, station_data):
     triggered_id = ctx.triggered_id
-    print(triggered_id)
 
     if triggered_id == 'btn-process':
         if not markers or not grid_data or not point_data:
@@ -196,6 +254,34 @@ def process_and_plot(process_btn, load_btn, markers, grid_data, point_data, stat
 
         # print(point_data)
         return dash.no_update, dash.no_update, grid_data, point_data, station_data
+        
+@app.callback(
+    Output("drawn-marker-layer", "children"),
+    Input("draw-control", "geojson"),
+)
+def update_drawn_markers(geojson):
+    if not geojson or "features" not in geojson:
+        return []
+
+    markers = []
+    for feature in geojson["features"]:
+        if feature["geometry"]["type"] == "Point":
+            lon, lat = feature["geometry"]["coordinates"]
+            # Example: Red marker
+            markers.append(dl.CircleMarker(
+                center=(lat, lon),
+                radius=8,
+                color="#000000",
+                dashArray="4",
+                fill=True,
+                fillOpacity=0.3,
+                weight=1,
+                children=[
+                    dl.Tooltip(f"New Station: {lat}, {lon}"),
+                    dl.Popup(f"New Station: {lat}, {lon}")
+                ]
+            ))
+    return markers
 
 
 if __name__ == '__main__':
