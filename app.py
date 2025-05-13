@@ -14,24 +14,38 @@ app = dash.Dash(__name__)
 initial_fig = go.Figure()
 initial_fig.update_layout(margin=dict(l=0, r=0, t=0, b=0))
 
+# Combine multiple qualitative color scales
+combined_colors = (
+    px.colors.qualitative.Plotly +
+    px.colors.qualitative.D3 +
+    px.colors.qualitative.T10 +
+    px.colors.qualitative.Alphabet +
+    px.colors.qualitative.Set3
+)
 
+MAX_STATIONS = 50
 # Example: 10 distinct station IDs
-station_ids = list(range(1, 10))  # e.g., 101 to 110
+station_ids = list(range(1, MAX_STATIONS))  # e.g., 101 to 110
 
 # Use Plotly categorical colors (or pick any 10 hex codes)
-colors = px.colors.qualitative.Plotly[:10]
+colors = combined_colors[:MAX_STATIONS]
 
 # Build the color map dictionary
 color_map = {sid: color for sid, color in zip(station_ids, colors)}
 
-
 point_to_layer = assign("""function(feature, latlng, context){
-    const circleOptions = context.hideout.circleOptions;
-    const id = feature.properties.incident_id;
+    const circleOptions = { ...context.hideout.circleOptions };  // clone to avoid mutation
+    const iid = feature.properties.incident_id;
+    const sid = feature.properties.station_id;
+    const colorMap = context.hideout.color_map;
+
+    // Assign color based on station_id
+    circleOptions.fillColor = colorMap[sid] || "#ff0000";  // fallback color if not in color_map
+
     const marker = L.circleMarker(latlng, circleOptions);
 
     // Tooltip content from feature properties
-    const tooltipText = "Incident: " + (id !== undefined ? id : "N/A");
+    const tooltipText = "Incident: " + (iid !== undefined ? iid : "N/A") + "<br>Station ID: " + (sid !== undefined ? sid : "N/A");
     marker.bindTooltip(tooltipText);
 
     return marker;
@@ -71,6 +85,17 @@ incident_tooltip_handle = assign("""function(feature, layer) {
     }
 }""")
 
+grid_tooltip_handle = assign("""function(feature, layer) {
+    if (feature.properties && feature.properties.station_id) {
+        const cell_id = feature.properties.cell_id;
+        const station_id = feature.properties.station_id;
+        layer.bindTooltip("Cell ID: " + cell_id + "<br>Station ID: " + station_id);
+    }
+    else {
+        layer.bindTooltip("No Station Assigned");
+    }
+}""")
+
 
 app.layout = html.Div(style={'height': '100vh', 'display': 'flex', 'flexDirection': 'column'}, children=[
     # Main content: map and plots
@@ -104,6 +129,7 @@ app.layout = html.Div(style={'height': '100vh', 'display': 'flex', 'flexDirectio
                                         ),
                                         hideout=dict(colorMap=color_map),
                                         zoomToBounds=True,
+                                        onEachFeature=grid_tooltip_handle,
                                     ),
                                 name="Grid Layer",
                                 checked=True,
@@ -121,7 +147,7 @@ app.layout = html.Div(style={'height': '100vh', 'display': 'flex', 'flexDirectio
                                             fillOpacity=1,
                                             stroke=False,
                                         ),
-                                            color_map=color_map,
+                                        color_map=color_map,
                                     )
                             ),
                             name="Incidents Layer",

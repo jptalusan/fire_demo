@@ -1,12 +1,20 @@
 window.dashExtensions = Object.assign({}, window.dashExtensions, {
     default: {
         function0: function(feature, latlng, context) {
-            const circleOptions = context.hideout.circleOptions;
-            const id = feature.properties.incident_id;
+            const circleOptions = {
+                ...context.hideout.circleOptions
+            }; // clone to avoid mutation
+            const iid = feature.properties.incident_id;
+            const sid = feature.properties.station_id;
+            const colorMap = context.hideout.color_map;
+
+            // Assign color based on station_id
+            circleOptions.fillColor = colorMap[sid] || "#ff0000"; // fallback color if not in color_map
+
             const marker = L.circleMarker(latlng, circleOptions);
 
             // Tooltip content from feature properties
-            const tooltipText = "Incident: " + (id !== undefined ? id : "N/A");
+            const tooltipText = "Incident: " + (iid !== undefined ? iid : "N/A") + "<br>Station ID: " + (sid !== undefined ? sid : "N/A");
             marker.bindTooltip(tooltipText);
 
             return marker;
@@ -40,6 +48,15 @@ window.dashExtensions = Object.assign({}, window.dashExtensions, {
         function3: function(feature, layer) {
             if (feature.properties && feature.properties.incident_id) {
                 layer.bindTooltip(feature.properties.incident_id);
+            }
+        },
+        function4: function(feature, layer) {
+            if (feature.properties && feature.properties.station_id) {
+                const cell_id = feature.properties.cell_id;
+                const station_id = feature.properties.station_id;
+                layer.bindTooltip("Cell ID: " + cell_id + "<br>Station ID: " + station_id);
+            } else {
+                layer.bindTooltip("No Station Assigned");
             }
         }
     }

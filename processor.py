@@ -2,13 +2,12 @@ import numpy as np
 import re
 import random
 import time
-import re
 import gurobipy as gp
 from gurobipy import GRB
 from collections import Counter
 import joblib
 import geopandas as gpd
-
+import ast
 import os
 import pandas as pd
 import json
@@ -21,6 +20,14 @@ def extract_station_number(station_name):
     match = re.search(r'\d+', station_name)
     return int(match.group()) if match else None
 
+def get_results(station_data, incident_data, grid_data):
+    # read the files in output directory
+    cell_to_station = pd.read_csv("output/cell_to_station.csv")
+    fire_stations = pd.read_csv("output/fire_stations.csv")
+    incident_to_station = pd.read_csv("output/incidents_to_station.csv")
+    
+    return cell_to_station, fire_stations, incident_to_station
+    
 def process_markers(markers, grid_geojson, incident_geojson, station_data):
     '''
     Process markers and generate data for the frontend. 
@@ -34,74 +41,99 @@ def process_markers(markers, grid_geojson, incident_geojson, station_data):
     Returns:
         dict: Processed data including station-cell-incident mapping, float array (travel times or distances), and updated GeoJSON data for colors.
     '''
-    grids    = gpd.GeoDataFrame.from_features(grid_geojson,    crs="EPSG:4326")
-    incidents= gpd.GeoDataFrame.from_features(incident_geojson,   crs="EPSG:4326")
-    fire_stations = gpd.GeoDataFrame.from_features(station_data, crs="EPSG:4326")
-    fire_stations= gpd.sjoin(fire_stations, grids, how='inner', predicate='within')
-    L=list(grids['cell_id'])
-    X_exist= list(fire_stations['cell_id'])
+    # grids    = gpd.GeoDataFrame.from_features(grid_geojson,    crs="EPSG:4326")
+    # incidents= gpd.GeoDataFrame.from_features(incident_geojson,   crs="EPSG:4326")
+    # fire_stations = gpd.GeoDataFrame.from_features(station_data, crs="EPSG:4326")
+    # fire_stations= gpd.sjoin(fire_stations, grids, how='inner', predicate='within')
+    # L=list(grids['cell_id'])
+    # X_exist= list(fire_stations['cell_id'])
 
-    E = list(range(len(incidents)))
-    a= joblib.load("data/a_sub.pkl")
-    d= joblib.load("data/first_half_by_i.pkl")
-    # assignments
-    m, X, Y, b = add_p_via_mip_multi(E,L,a,d,X_exist,p_add=0, alpha=0)
-    sol_X_vals,sol_Y_assign=save_p_median_solution( X, Y, E, L)
-    sol_X_vals.reset_index(inplace=True,names='location')
-    sol_X = fill_solution_X(sol_X_vals, grids, fire_stations)
-    sol_X= gpd.GeoDataFrame(sol_X, geometry='geometry')
-    sol_X.crs= 'EPSG:4326'
-    sol_Y= compute_nearest_assignments(sol_Y_assign, incidents, sol_X)
-    sol_Y=sol_Y.sjoin(grids, how='inner', predicate='within')
+    # E = list(range(len(incidents)))
+    # a= joblib.load("data/a_sub.pkl")
+    # d= joblib.load("data/first_half_by_i.pkl")
+    # # assignments
+    # m, X, Y, b = add_p_via_mip_multi(E,L,a,d,X_exist,p_add=0, alpha=0)
+    # sol_X_vals,sol_Y_assign=save_p_median_solution( X, Y, E, L)
+    # sol_X_vals.reset_index(inplace=True,names='location')
+    # sol_X = fill_solution_X(sol_X_vals, grids, fire_stations)
+    # sol_X= gpd.GeoDataFrame(sol_X, geometry='geometry')
+    # sol_X.crs= 'EPSG:4326'
+    # sol_Y= compute_nearest_assignments(sol_Y_assign, incidents, sol_X)
+    # sol_Y=sol_Y.sjoin(grids, how='inner', predicate='within')
 
-    cell_to_station=sol_Y.drop_duplicates(subset=['FacilityName','assigned_cell_id'], keep='first')[['FacilityName','assigned_cell_id']]
-    incidents_to_station=sol_Y.drop_duplicates(subset=['demand','FacilityName'], keep='first')[['demand','FacilityName','assigned_cell_id','cell_id']]
-    groups=sol_Y.groupby('FacilityName')
-    travel_times={}
-    for name, group in groups:
-        travel_time=[]
-        for i,row in group.iterrows():
-            travel_time.append((d[row['demand'],row['assigned_cell_id']]))
-        travel_times[name]=travel_time
+    # cell_to_station=sol_Y.drop_duplicates(subset=['FacilityName','assigned_cell_id'], keep='first')[['FacilityName','assigned_cell_id']]
+    # incidents_to_station=sol_Y.drop_duplicates(subset=['demand','FacilityName'], keep='first')[['demand','FacilityName','assigned_cell_id','cell_id']]
+    # groups=sol_Y.groupby('FacilityName')
+    # travel_times={}
+    # for name, group in groups:
+    #     travel_time=[]
+    #     for i,row in group.iterrows():
+    #         travel_time.append((d[row['demand'],row['assigned_cell_id']]))
+    #     travel_times[name]=travel_time
         
         
-    travel_times_df=pd.Series(travel_times, name='travel_times').to_frame()
-    travel_times_df.reset_index(inplace=True,names='FacilityName')
-    fire_stations=pd.merge(fire_stations, travel_times_df, on='FacilityName', how='left')
-    incidents_to_station.rename(columns={'demand':'incident_id'}, inplace=True)
-    fire_stations.drop(columns=['geometry'], inplace=True)
-
-    '''
-    station, cell
-    station, incident
-    '''
+    # travel_times_df=pd.Series(travel_times, name='travel_times').to_frame()
+    # travel_times_df.reset_index(inplace=True,names='FacilityName')
+    # fire_stations=pd.merge(fire_stations, travel_times_df, on='FacilityName', how='left')
+    # incidents_to_station.rename(columns={'demand':'incident_id'}, inplace=True)
+    # fire_stations.drop(columns=['geometry'], inplace=True)
     
-    # Use GeoJSONs however needed (e.g., loop through features)
+    cell_to_station, fire_stations, incident_to_station = get_results(station_data, None, None)
+
     for feature in grid_geojson.get("features", []):
-        feature["properties"]["station_id"] = 5
+        cell_id = feature["properties"].get("cell_id", None)
+        try:
+            facility_name = incident_to_station.loc[incident_to_station['cell_id'] == cell_id, 'FacilityName'].iloc[0]
+            facility_name = extract_station_number(facility_name)
+        except IndexError:
+            facility_name = -1
+
+        if cell_id is not None:
+            feature["properties"]["station_id"] = facility_name
+        else:
+            # If no cell_id, assign a default station_id (e.g., 5)
+            feature["properties"]["station_id"] = -1
 
     for feature in incident_geojson.get("features", []):
-        feature["properties"]["station_id"] = 5
+        incident_id = feature["properties"].get("incident_id", None)
+        try:
+            facility_name = incident_to_station.loc[incident_to_station['incident_id'] == incident_id, 'FacilityName'].iloc[-1]
+            facility_name = extract_station_number(facility_name)
+        except IndexError:
+            facility_name = -1
 
-    station_ids = []
-    for feature in station_data.get("features", []):
-        station_id = feature["properties"]["station_id"]
-        if station_id is not None:
-            station_ids.append(station_id)
-    for feature in markers.get("features", []):
-        station_id = feature["properties"]["station_id"]
-        if station_id is not None:
-            station_ids.append(station_id)
-    station_ids = list(set(station_ids))
+        if incident_id is not None:
+            # Same as above, if you have an array INCIDENT_COUNT long, then just do station_id = OUTPUT[incident_id]
+            feature["properties"]["station_id"] = facility_name
+        else:
+            feature["properties"]["station_id"] = -1
+
+    station_data = {}
+    incident_counts = {}
+    for k, v in fire_stations.iterrows():
+        station_id = v["FacilityName"]
+        travel_times = v["travel_times"]
+        try:
+            station_data[station_id] = ast.literal_eval(travel_times)
+            incident_counts[station_id] = len(travel_times)
+        except (ValueError, SyntaxError):
+            print(f"Error parsing travel times for station {station_id}: {travel_times}")
+            station_data[station_id] = []
+            incident_counts[station_id] = 0
+            continue
+
+    station_data = dict(sorted(station_data.items(), key=lambda x: x[0]))
+    incident_counts = dict(sorted(incident_counts.items(), key=lambda x: x[0]))
 
     res = {
         "processed_coords": None,
-        "station_data": generate_station_data(station_ids),
-        "incident_counts":  generate_incident_counts(station_ids, len(incident_geojson["features"])),
+        "station_data": station_data,
+        "incident_counts":  incident_counts,
         "grid_geojson": grid_geojson,
         "point_geojson": incident_geojson,
     }
     return res
+
 
 def generate_station_data(station_ids=[], min_samples=5, max_samples=15):
     station_data = {}
