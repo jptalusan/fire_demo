@@ -195,6 +195,7 @@ app.layout = html.Div(style={'height': '100vh', 'display': 'flex', 'flexDirectio
         'padding': '10px',
         'backgroundColor': '#f9f9f9'
     }, children=[
+        html.Div(id="marker-count", style={"marginTop": "10px", "fontWeight": "bold", 'marginRight': '10px'}),
         html.Button("Load GeoJSON", id="btn-load-geojson", n_clicks=0, style={'marginRight': '10px'}),
         html.Button("Process", id="btn-process", n_clicks=0),
         dcc.Store(id="all-markers"),  # store marker list
@@ -202,6 +203,18 @@ app.layout = html.Div(style={'height': '100vh', 'display': 'flex', 'flexDirectio
         dcc.Store(id="new-station-ids"),
     ])
 ])
+
+@app.callback(
+    Output("marker-count", "children"),
+    Input("all-markers", "data"),
+    prevent_initial_call=False
+)
+def update_marker_count(marker_data):
+    if not marker_data:
+        return "No markers added."
+    
+    count = len(marker_data.get("features", []))
+    return f"{count} new station{'s' if count != 1 else ''} added."
 
 
 # Process all markers and update the top-right plot
@@ -263,7 +276,7 @@ def process_and_plot(process_btn, load_btn, markers, grid_data, point_data, stat
         return top_fig, bottom_fig, updated_grid_data, updated_point_data, station_data, dash.no_update
     
     elif triggered_id == 'btn-load-geojson':
-        with open(os.path.join("data", "grids_w_id.geojson")) as f:
+        with open(os.path.join("data", "grids.geojson")) as f:
             grid_data = json.load(f)
         with open(os.path.join("data", "incidents.geojson")) as f:
             point_data = json.load(f)
