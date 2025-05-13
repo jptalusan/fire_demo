@@ -1,6 +1,6 @@
-dash
-dash-leaflet
-plotly
-geojson
-pandas
-geopandas
+dash==3.0.4
+dash-leaflet==1.1.2
+plotly==6.0.1
+geojson==3.2.0
+pandas==2.2.3
+geopandas==1.0.1
