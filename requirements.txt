@@ -1,3 +1,6 @@
 dash
 dash-leaflet
 plotly
+geojson
+pandas
+geopandas

@@ -5,7 +5,7 @@ from dash import html, dcc, Input, Output, State, ctx
 import dash_leaflet as dl
 import plotly.graph_objs as go
 import plotly.express as px
-from processor import process_markers
+from processor import process_markers, extract_station_number
 from dash_extensions.javascript import assign
 
 app = dash.Dash(__name__)
@@ -178,25 +178,12 @@ app.layout = html.Div(style={'height': '100vh', 'display': 'flex', 'flexDirectio
     }, children=[
         html.Button("Load GeoJSON", id="btn-load-geojson", n_clicks=0, style={'marginRight': '10px'}),
         html.Button("Process", id="btn-process", n_clicks=0),
-        dcc.Store(id="all-markers")  # store marker list
+        dcc.Store(id="all-markers"),  # store marker list
+        dcc.Store(id="station-ids"),
+        dcc.Store(id="new-station-ids"),
     ])
 ])
 
-# Store all marker coordinates whenever one is added
-@app.callback(
-    Output("all-markers", "data"),
-    Input("draw-control", "geojson"),
-)
-def update_marker_store(geojson):
-    if not geojson or "features" not in geojson:
-        return []
-
-    coords = []
-    for feature in geojson["features"]:
-        if feature["geometry"]["type"] == "Point":
-            lon, lat = feature["geometry"]["coordinates"]
-            coords.append((lat, lon))
-    return coords
 
 # Process all markers and update the top-right plot
 @app.callback(
@@ -206,6 +193,7 @@ def update_marker_store(geojson):
         Output("grid-layer", "data"),
         Output("point-layer", "data"),
         Output("station-layer", "data"),
+        Output("station-ids", "data", allow_duplicate=True),
     ],
     Input("btn-process", "n_clicks"),
     Input("btn-load-geojson", "n_clicks"),
@@ -222,10 +210,10 @@ def process_and_plot(process_btn, load_btn, markers, grid_data, point_data, stat
     if triggered_id == 'btn-process':
         if not markers or not grid_data or not point_data:
             # If no markers or data, return initial empty figures
-            return initial_fig, initial_fig, dash.no_update, dash.no_update, dash.no_update
+            return initial_fig, initial_fig, dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
         # Callback to process markers (p-median)
-        result = process_markers(markers, grid_data, point_data)
+        result = process_markers(markers, grid_data, point_data, station_data)
         processed = result["processed_coords"]
         bar_data = result["bar_data"]
         float_array = result["float_array"]
@@ -242,31 +230,52 @@ def process_and_plot(process_btn, load_btn, markers, grid_data, point_data, stat
         bottom_fig.add_trace(go.Bar(x=list(range(len(float_array))), y=float_array, name="Float Values"))
         bottom_fig.update_layout(title="Float Array Plot")
 
-        return top_fig, bottom_fig, updated_grid_data, updated_point_data, station_data
+        return top_fig, bottom_fig, updated_grid_data, updated_point_data, station_data, dash.no_update
     
     elif triggered_id == 'btn-load-geojson':
         with open(os.path.join("data", "grids_w_id.geojson")) as f:
             grid_data = json.load(f)
-        with open(os.path.join("data", "points.geojson")) as f:
+        with open(os.path.join("data", "incidents.geojson")) as f:
             point_data = json.load(f)
         with open(os.path.join("data", "firestations.geojson")) as f:
             station_data = json.load(f)
 
-        # print(point_data)
-        return dash.no_update, dash.no_update, grid_data, point_data, station_data
+        station_ids = []
+        for station in station_data["features"]:
+            facility_name = station["properties"]["FacilityName"]
+            station_id = extract_station_number(facility_name)
+            station_ids.append(station_id)
+            station["properties"]["station_id"] = station_id
+        unique_ids = sorted(set(station_ids))
+
+        return dash.no_update, dash.no_update, grid_data, point_data, station_data, unique_ids
         
 @app.callback(
     Output("drawn-marker-layer", "children"),
+    Output("all-markers", "data"),
+    Output("station-ids", "data", allow_duplicate=True),
     Input("draw-control", "geojson"),
+    State("station-ids", "data"),
+    prevent_initial_call=True,
 )
-def update_drawn_markers(geojson):
+def update_drawn_markers(geojson, station_ids):
     if not geojson or "features" not in geojson:
-        return []
+        return [], dash.no_update, dash.no_update
+
+    if not station_ids:
+        station_ids = []
 
     markers = []
+    new_station_ids = []
     for feature in geojson["features"]:
         if feature["geometry"]["type"] == "Point":
+            # Find lowest unused station_id >= 1
+            next_id = 1
+            while (next_id in station_ids) or (next_id in new_station_ids):
+                next_id += 1
+            new_station_ids.append(next_id)
             lon, lat = feature["geometry"]["coordinates"]
+            feature["properties"]["station_id"] = next_id
             # Example: Red marker
             markers.append(dl.CircleMarker(
                 center=(lat, lon),
@@ -277,12 +286,24 @@ def update_drawn_markers(geojson):
                 fillOpacity=0.3,
                 weight=1,
                 children=[
-                    dl.Tooltip(f"New Station: {lat}, {lon}"),
-                    dl.Popup(f"New Station: {lat}, {lon}")
+                    dl.Tooltip(
+                        html.Div([
+                            html.B(f"New Station {next_id}"),
+                            html.Br(),
+                            html.Span(f"{lat:.4f}, {lon:.4f}")
+                        ])
+                    ),
+                    dl.Popup(
+                        html.Div([
+                            html.B(f"New Station {next_id}"),
+                            html.Br(),
+                            html.Span(f"{lat:.4f}, {lon:.4f}")
+                        ])
+                    )
                 ]
             ))
-    return markers
-
+    
+    return markers, geojson, station_ids
 
 if __name__ == '__main__':
     app.run(debug=True)
