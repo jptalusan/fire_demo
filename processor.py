@@ -52,22 +52,25 @@ def process_markers(markers, grid_geojson, incident_geojson, station_data):
     sol_X= gpd.GeoDataFrame(sol_X, geometry='geometry')
     sol_X.crs= 'EPSG:4326'
     sol_Y= compute_nearest_assignments(sol_Y_assign, incidents, sol_X)
+    sol_Y=sol_Y.sjoin(grids, how='inner', predicate='within')
 
     cell_to_station=sol_Y.drop_duplicates(subset=['FacilityName','assigned_cell_id'], keep='first')[['FacilityName','assigned_cell_id']]
-    incidents_to_station=sol_Y.drop_duplicates(subset=['demand','FacilityName'], keep='first')[['demand','FacilityName','assigned_cell_id']]
+    incidents_to_station=sol_Y.drop_duplicates(subset=['demand','FacilityName'], keep='first')[['demand','FacilityName','assigned_cell_id','cell_id']]
     groups=sol_Y.groupby('FacilityName')
     travel_times={}
     for name, group in groups:
-        travel_time=0
+        travel_time=[]
         for i,row in group.iterrows():
-            travel_time+= d[row['demand'],row['assigned_cell_id']]
-        travel_times[name]=travel_time/len(group)
+            travel_time.append((d[row['demand'],row['assigned_cell_id']]))
+        travel_times[name]=travel_time
         
         
-    travel_times_df=pd.DataFrame.from_dict(travel_times, orient='index', columns=['travel_time'])
+    travel_times_df=pd.Series(travel_times, name='travel_times').to_frame()
     travel_times_df.reset_index(inplace=True,names='FacilityName')
     fire_stations=pd.merge(fire_stations, travel_times_df, on='FacilityName', how='left')
     incidents_to_station.rename(columns={'demand':'incident_id'}, inplace=True)
+    fire_stations.drop(columns=['geometry'], inplace=True)
+
     '''
     station, cell
     station, incident
