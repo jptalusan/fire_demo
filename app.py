@@ -25,12 +25,16 @@ colors = px.colors.qualitative.Plotly[:10]
 color_map = {sid: color for sid, color in zip(station_ids, colors)}
 
 
-
 point_to_layer = assign("""function(feature, latlng, context){
     const circleOptions = context.hideout.circleOptions;
-    const id = feature.properties.station_id;
-    circleOptions.fillColor = context.hideout.color_map[id] || "#ff0000";  // fallback color
-    return L.circleMarker(latlng, circleOptions);  // render a simple circle marker
+    const id = feature.properties.incident_id;
+    const marker = L.circleMarker(latlng, circleOptions);
+
+    // Tooltip content from feature properties
+    const tooltipText = "Incident: " + (id !== undefined ? id : "N/A");
+    marker.bindTooltip(tooltipText);
+
+    return marker;
 }""")
 
 grid_style_handle = assign("""function(feature, context) {
@@ -53,6 +57,18 @@ grid_style_handle = assign("""function(feature, context) {
         fillColor: colorMap[id] || "#999999",  // fallback color
         fillOpacity: 0.5                  // Fill opacity
     };
+}""")
+
+station_tooltip_handle = assign("""function(feature, layer) {
+    if (feature.properties && feature.properties.FacilityName) {
+        layer.bindTooltip(feature.properties.FacilityName);
+    }
+}""")
+
+incident_tooltip_handle = assign("""function(feature, layer) {
+    if (feature.properties && feature.properties.incident_id) {
+        layer.bindTooltip(feature.properties.incident_id);
+    }
 }""")
 
 
@@ -95,7 +111,9 @@ app.layout = html.Div(style={'height': '100vh', 'display': 'flex', 'flexDirectio
                         dl.Overlay(
                             dl.GeoJSON(id="point-layer", 
                                     zoomToBounds=True, 
-                                    options=dict(pointToLayer=point_to_layer),
+                                    options=dict(
+                                        pointToLayer=point_to_layer,
+                                    ),
                                     hideout=dict(
                                         circleOptions=dict(
                                             radius=5,
@@ -113,7 +131,8 @@ app.layout = html.Div(style={'height': '100vh', 'display': 'flex', 'flexDirectio
                             dl.GeoJSON(id="station-layer",
                                     zoomToBounds=True,
                                     options=dict(
-                                        style=dict(color="blue", weight=0.25, fillOpacity=0.1)
+                                        style=dict(color="blue", weight=0.25, fillOpacity=0.1),
+                                        onEachFeature=station_tooltip_handle,
                                     ),
                                     hideout=dict(colorMap=color_map),
                             ),
@@ -214,22 +233,33 @@ def process_and_plot(process_btn, load_btn, markers, grid_data, point_data, stat
 
         # Callback to process markers (p-median)
         result = process_markers(markers, grid_data, point_data, station_data)
-        processed = result["processed_coords"]
-        bar_data = result["bar_data"]
-        float_array = result["float_array"]
+        
+        station_data = result["station_data"]
+        incident_counts = result["incident_counts"]
         updated_grid_data = result["grid_geojson"]
         updated_point_data = result["point_geojson"]
 
         # 1. Top plot from dictionary
         top_fig = go.Figure()
-        top_fig.add_trace(go.Bar(x=bar_data["category"], y=bar_data["value"], name="Top Bar"))
-        top_fig.update_layout(title="Top Bar Plot (from dict)")
+
+        box_color = "#1f77b4"  # A Plotly default blue
+        # Create a box plot for each station
+        for station, values in result["station_data"].items():
+            top_fig.add_trace(go.Box(y=values, name=station, boxpoints='outliers', showlegend=False, jitter=0.5, marker_color=box_color))
+
+        top_fig.update_layout(
+            title="Travel Distance by Station",
+            xaxis_title="Station",
+            yaxis_title="Value",
+            margin=dict(l=40, r=20, t=40, b=30),
+            xaxis=dict(
+                tickangle=-90,
+                automargin=True  # ensures labels don't get cut off
+            ),
+        )
 
         # 2. Bottom plot from float_array
-        bottom_fig = go.Figure()
-        bottom_fig.add_trace(go.Bar(x=list(range(len(float_array))), y=float_array, name="Float Values"))
-        bottom_fig.update_layout(title="Float Array Plot")
-
+        bottom_fig = make_incident_bar_plot(incident_counts)
         return top_fig, bottom_fig, updated_grid_data, updated_point_data, station_data, dash.no_update
     
     elif triggered_id == 'btn-load-geojson':
@@ -304,6 +334,28 @@ def update_drawn_markers(geojson, station_ids):
             ))
     
     return markers, geojson, station_ids
+
+def make_incident_bar_plot(incident_counts_dict):
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=list(incident_counts_dict.keys()),
+        y=list(incident_counts_dict.values()),
+        marker_color='indianred',
+        name='Incident Count'
+    ))
+
+    fig.update_layout(
+        title="Incident Counts per Station",
+        xaxis_title="Station",
+        yaxis_title="Incident Count",
+        template="plotly_white",
+        xaxis=dict(
+            tickangle=-90,
+            automargin=True  # ensures labels don't get cut off
+        ),
+        margin=dict(l=40, r=20, t=40, b=30),
+    )
+    return fig
 
 if __name__ == '__main__':
     app.run(debug=True)

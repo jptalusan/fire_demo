@@ -2,9 +2,14 @@ window.dashExtensions = Object.assign({}, window.dashExtensions, {
     default: {
         function0: function(feature, latlng, context) {
             const circleOptions = context.hideout.circleOptions;
-            const id = feature.properties.station_id;
-            circleOptions.fillColor = context.hideout.color_map[id] || "#ff0000"; // fallback color
-            return L.circleMarker(latlng, circleOptions); // render a simple circle marker
+            const id = feature.properties.incident_id;
+            const marker = L.circleMarker(latlng, circleOptions);
+
+            // Tooltip content from feature properties
+            const tooltipText = "Incident: " + (id !== undefined ? id : "N/A");
+            marker.bindTooltip(tooltipText);
+
+            return marker;
         },
         function1: function(feature, context) {
             const id = feature.properties.station_id;
@@ -26,6 +31,16 @@ window.dashExtensions = Object.assign({}, window.dashExtensions, {
                 fillColor: colorMap[id] || "#999999", // fallback color
                 fillOpacity: 0.5 // Fill opacity
             };
+        },
+        function2: function(feature, layer) {
+            if (feature.properties && feature.properties.FacilityName) {
+                layer.bindTooltip(feature.properties.FacilityName);
+            }
+        },
+        function3: function(feature, layer) {
+            if (feature.properties && feature.properties.incident_id) {
+                layer.bindTooltip(feature.properties.incident_id);
+            }
         }
     }
 });
