@@ -41,44 +41,56 @@ def process_markers(markers, grid_geojson, incident_geojson, station_data):
     Returns:
         dict: Processed data including station-cell-incident mapping, float array (travel times or distances), and updated GeoJSON data for colors.
     '''
-    # grids    = gpd.GeoDataFrame.from_features(grid_geojson,    crs="EPSG:4326")
-    # incidents= gpd.GeoDataFrame.from_features(incident_geojson,   crs="EPSG:4326")
-    # fire_stations = gpd.GeoDataFrame.from_features(station_data, crs="EPSG:4326")
-    # fire_stations= gpd.sjoin(fire_stations, grids, how='inner', predicate='within')
-    # L=list(grids['cell_id'])
-    # X_exist= list(fire_stations['cell_id'])
-
-    # E = list(range(len(incidents)))
-    # a= joblib.load("data/a_sub.pkl")
-    # d= joblib.load("data/first_half_by_i.pkl")
-    # # assignments
-    # m, X, Y, b = add_p_via_mip_multi(E,L,a,d,X_exist,p_add=0, alpha=0)
-    # sol_X_vals,sol_Y_assign=save_p_median_solution( X, Y, E, L)
-    # sol_X_vals.reset_index(inplace=True,names='location')
-    # sol_X = fill_solution_X(sol_X_vals, grids, fire_stations)
-    # sol_X= gpd.GeoDataFrame(sol_X, geometry='geometry')
-    # sol_X.crs= 'EPSG:4326'
-    # sol_Y= compute_nearest_assignments(sol_Y_assign, incidents, sol_X)
-    # sol_Y=sol_Y.sjoin(grids, how='inner', predicate='within')
-
-    # cell_to_station=sol_Y.drop_duplicates(subset=['FacilityName','assigned_cell_id'], keep='first')[['FacilityName','assigned_cell_id']]
-    # incidents_to_station=sol_Y.drop_duplicates(subset=['demand','FacilityName'], keep='first')[['demand','FacilityName','assigned_cell_id','cell_id']]
-    # groups=sol_Y.groupby('FacilityName')
-    # travel_times={}
-    # for name, group in groups:
-    #     travel_time=[]
-    #     for i,row in group.iterrows():
-    #         travel_time.append((d[row['demand'],row['assigned_cell_id']]))
-    #     travel_times[name]=travel_time
-        
-        
-    # travel_times_df=pd.Series(travel_times, name='travel_times').to_frame()
-    # travel_times_df.reset_index(inplace=True,names='FacilityName')
-    # fire_stations=pd.merge(fire_stations, travel_times_df, on='FacilityName', how='left')
-    # incidents_to_station.rename(columns={'demand':'incident_id'}, inplace=True)
-    # fire_stations.drop(columns=['geometry'], inplace=True)
     
-    cell_to_station, fire_stations, incident_to_station = get_results(station_data, None, None)
+    grids    = gpd.GeoDataFrame.from_features(grid_geojson,    crs="EPSG:4326")
+    incidents= gpd.GeoDataFrame.from_features(incident_geojson,   crs="EPSG:4326")
+    fire_stations = gpd.GeoDataFrame.from_features(station_data, crs="EPSG:4326")
+    try:
+        gdf_markers = gpd.GeoDataFrame.from_features(markers, crs="EPSG:4326")
+        gdf_markers['FacilityName'] = (
+            gdf_markers['station_id']
+            .apply(lambda x: f"Station {x:02d}")
+        )
+        fire_stations=pd.concat([fire_stations,gdf_markers[['geometry','FacilityName']]],ignore_index=True)
+    except Exception as e:
+        print(f"Error processing markers: {e}")
+       
+    fire_stations= gpd.sjoin(fire_stations, grids, how='inner', predicate='within')
+    L=list(grids['cell_id'])
+    X_exist= list(fire_stations['cell_id'])
+
+    E = list(range(len(incidents)))
+    a= joblib.load("data/a_sub.pkl")
+    d= joblib.load("data/first_half_by_i.pkl")
+    # assignments
+    m, X, Y, b = add_p_via_mip_multi(E,L,a,d,X_exist,p_add=0, alpha=0)
+    sol_X_vals,sol_Y_assign=save_p_median_solution( X, Y, E, L)
+    sol_X_vals.reset_index(inplace=True,names='location')
+    sol_X = fill_solution_X(sol_X_vals, grids, fire_stations)
+    sol_X= gpd.GeoDataFrame(sol_X, geometry='geometry')
+    sol_X.crs= 'EPSG:4326'
+    sol_Y= compute_nearest_assignments(sol_Y_assign, incidents, sol_X)
+    sol_Y=sol_Y.sjoin(grids, how='inner', predicate='within')
+
+    cell_to_station=sol_Y.drop_duplicates(subset=['FacilityName','assigned_cell_id'], keep='first')[['FacilityName','assigned_cell_id']]
+    incident_to_station=sol_Y.drop_duplicates(subset=['demand','FacilityName'], keep='first')[['demand','FacilityName','assigned_cell_id','cell_id']]
+    groups=sol_Y.groupby('FacilityName')
+    travel_times={}
+    for name, group in groups:
+        travel_time=[]
+        for i,row in group.iterrows():
+            travel_time.append((float(d[row['demand'],row['assigned_cell_id']])))
+        travel_times[name]=travel_time
+        
+        
+    travel_times_df=pd.Series(travel_times, name='travel_times').to_frame()
+    travel_times_df.reset_index(inplace=True,names='FacilityName')
+    fire_stations=pd.merge(fire_stations, travel_times_df, on='FacilityName', how='left')
+    incident_to_station.rename(columns={'demand':'incident_id'}, inplace=True)
+    fire_stations.drop(columns=['geometry'], inplace=True)
+
+    
+    # cell_to_station, fire_stations, incident_to_station = get_results(station_data, None, None)
 
     for feature in grid_geojson.get("features", []):
         cell_id = feature["properties"].get("cell_id", None)
@@ -113,14 +125,29 @@ def process_markers(markers, grid_geojson, incident_geojson, station_data):
     for k, v in fire_stations.iterrows():
         station_id = v["FacilityName"]
         travel_times = v["travel_times"]
-        try:
-            station_data[station_id] = ast.literal_eval(travel_times)
-            incident_counts[station_id] = len(travel_times)
-        except (ValueError, SyntaxError):
-            print(f"Error parsing travel times for station {station_id}: {travel_times}")
-            station_data[station_id] = []
-            incident_counts[station_id] = 0
-            continue
+        if isinstance(travel_times, list):
+                station_data[station_id] = travel_times
+                incident_counts[station_id] = len(travel_times)
+
+            # Case 2: missing or NaN → treat as empty
+        elif pd.isna(travel_times):
+                station_data[station_id] = []
+                incident_counts[station_id] = 0
+
+            # Case 3: string representation of a list → parse it
+        elif isinstance(travel_times, str):
+                try:
+                    parsed = ast.literal_eval(travel_times)
+                    station_data[station_id] = parsed
+                    incident_counts[station_id] = len(parsed)
+                except (ValueError, SyntaxError):
+                    station_data[station_id] = []
+                    incident_counts[station_id] = 0
+
+            # Fallback: anything else → empty
+        else:
+                station_data[station_id] = []
+                incident_counts[station_id] = 0
 
     station_data = dict(sorted(station_data.items(), key=lambda x: x[0]))
     incident_counts = dict(sorted(incident_counts.items(), key=lambda x: x[0]))
