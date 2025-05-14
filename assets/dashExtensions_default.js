@@ -42,7 +42,11 @@ window.dashExtensions = Object.assign({}, window.dashExtensions, {
         },
         function2: function(feature, layer) {
             if (feature.properties && feature.properties.FacilityName) {
-                layer.bindTooltip(feature.properties.FacilityName);
+                layer.bindTooltip(feature.properties.FacilityName, {
+                    permanent: true,
+                    direction: "top",
+                    className: "station-label"
+                }).openTooltip(); // force open in case it's not triggered
             }
         },
         function3: function(feature, layer) {

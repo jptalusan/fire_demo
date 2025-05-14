@@ -7,6 +7,7 @@ import plotly.graph_objs as go
 import plotly.express as px
 from processor import process_markers, extract_station_number
 from dash_extensions.javascript import assign
+from datetime import date
 
 app = dash.Dash(__name__)
 
@@ -75,7 +76,11 @@ grid_style_handle = assign("""function(feature, context) {
 
 station_tooltip_handle = assign("""function(feature, layer) {
     if (feature.properties && feature.properties.FacilityName) {
-        layer.bindTooltip(feature.properties.FacilityName);
+        layer.bindTooltip(feature.properties.FacilityName, {
+            permanent: true,
+            direction: "top",
+            className: "station-label"
+        }).openTooltip();  // force open in case it's not triggered
     }
 }""")
 
@@ -158,9 +163,9 @@ app.layout = html.Div(style={'height': '100vh', 'display': 'flex', 'flexDirectio
                                     zoomToBounds=True,
                                     options=dict(
                                         style=dict(color="blue", weight=0.25, fillOpacity=0.1),
-                                        onEachFeature=station_tooltip_handle,
                                     ),
                                     hideout=dict(colorMap=color_map),
+                                    onEachFeature=station_tooltip_handle,
                             ),
                             name="Stations Layer",
                             checked=True,
@@ -213,14 +218,32 @@ app.layout = html.Div(style={'height': '100vh', 'display': 'flex', 'flexDirectio
 
     # Bottom area with buttons
     html.Div(style={
-        'height': '60px',
+        'height': '50px',
         'display': 'flex',
-        'justifyContent': 'center',
-        'alignItems': 'center',
-        'borderTop': '1px solid #ccc',
+        'justifyContent': 'left',
+        'alignItems': 'left',
+        # 'borderTop': '1px solid #ccc',
         'padding': '10px',
         'backgroundColor': '#f9f9f9'
     }, children=[
+        html.Div([
+            html.Label("Select Date Range of Incidents:", style={'fontSize': '12px', 'marginRight': '6px'}),
+            dcc.DatePickerRange(
+                id='date-picker-range',
+                min_date_allowed=date(2023, 11, 1),
+                max_date_allowed=date(2023, 11, 15),
+                start_date=date(2023, 11, 1),
+                end_date=date(2023, 11, 15),
+                display_format='YYYY-MM-DD',
+                style={
+                    'fontSize': '12px',
+                    'padding': '2px',
+                    'margin': '2px',
+                    'height': '30px'
+                }
+            )
+            ], style={'display': 'inline-block', 'verticalAlign': 'middle', 'marginRight': '10px'}
+        ),
         html.Div(id="marker-count", style={"marginTop": "10px", "fontWeight": "bold", 'marginRight': '10px'}),
         html.Button("Load GeoJSON", id="btn-load-geojson", n_clicks=0, style={'marginRight': '10px'}),
         html.Button("Process", id="btn-process", n_clicks=0),
@@ -287,7 +310,7 @@ def process_and_plot(process_btn, load_btn, markers, grid_data, point_data, stat
             top_fig.add_trace(go.Box(y=values, name=station, boxpoints='outliers', showlegend=False, jitter=0.5, marker_color=box_color))
 
         top_fig.update_layout(
-            title="Travel Distance by Station",
+            title="Travel Time by Station (seconds)",
             xaxis_title="Station",
             yaxis_title="Value",
             margin=dict(l=40, r=20, t=40, b=30),
@@ -296,6 +319,9 @@ def process_and_plot(process_btn, load_btn, markers, grid_data, point_data, stat
                 automargin=True  # ensures labels don't get cut off
             ),
         )
+        # add a horizontal line at y=240 no annotation
+        top_fig.add_hline(y=240, line_color="green", line_width=2, line_dash="dash")
+        top_fig.add_hline(y=320, line_color="red", line_width=2, line_dash="dash")
 
         # 2. Bottom plot from float_array
         bottom_fig = make_incident_bar_plot(incident_counts)
@@ -356,11 +382,10 @@ def update_drawn_markers(geojson, station_ids):
                 weight=1,
                 children=[
                     dl.Tooltip(
-                        html.Div([
-                            html.B(f"New Station {next_id}"),
-                            html.Br(),
-                            html.Span(f"{lat:.4f}, {lon:.4f}")
-                        ])
+                        f"New Station {next_id}",
+                        permanent=True,
+                        direction="top",
+                        className="always-label"
                     ),
                     dl.Popup(
                         html.Div([
