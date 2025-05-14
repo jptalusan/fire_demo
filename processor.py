@@ -79,7 +79,7 @@ def process_markers(markers, grid_geojson, incident_geojson, station_data):
     for name, group in groups:
         travel_time=[]
         for i,row in group.iterrows():
-            travel_time.append(min(float(d[row['demand'],row['assigned_cell_id']]),20))
+            travel_time.append(min(float(d[row['demand'],row['assigned_cell_id']])*60,25*60))
         travel_times[name]=travel_time
         
         
