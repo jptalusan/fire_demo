@@ -45,6 +45,7 @@ def process_markers(markers, grid_geojson, incident_geojson, station_data):
     grids    = gpd.GeoDataFrame.from_features(grid_geojson,    crs="EPSG:4326")
     incidents= gpd.GeoDataFrame.from_features(incident_geojson,   crs="EPSG:4326")
     fire_stations = gpd.GeoDataFrame.from_features(station_data, crs="EPSG:4326")
+
     try:
         gdf_markers = gpd.GeoDataFrame.from_features(markers, crs="EPSG:4326")
         gdf_markers['FacilityName'] = (
@@ -54,40 +55,74 @@ def process_markers(markers, grid_geojson, incident_geojson, station_data):
         fire_stations=pd.concat([fire_stations,gdf_markers[['geometry','FacilityName']]],ignore_index=True)
     except Exception as e:
         print(f"Error processing markers: {e}")
-       
+    with open("data/d_distance.json", "r") as f:
+        raw = json.load(f)
+        d_dist = {tuple(map(int,k.split(","))): v for k,v in raw.items() }
+
+    with open("data/d_time.json", "r") as f:
+        raw = json.load(f)
+        d_time = { tuple(map(int,k.split(","))): v for k,v in raw.items() }
+        
+    with open("data/a_historical_density.json", "r") as f:
+        raw = json.load(f)
+        a_density = { int(k): v for k, v in raw.items() }
+        
+    # markers={'type': 'FeatureCollection', 'features': [{'type': 'Feature', 'properties': {'type': 'marker', '_leaflet_id': 15795, 'station_id': 2}, 'geometry': {'type': 'Point', 'coordinates': [-86.9121551513672, 36.27638594874375]}}, {'type': 'Feature', 'properties': {'type': 'marker', '_leaflet_id': 15824, 'station_id': 42}, 'geometry': {'type': 'Point', 'coordinates': [-86.75148010253906, 36.348314860643015]}}, {'type': 'Feature', 'properties': {'type': 'marker', '_leaflet_id': 15841, 'station_id': 43}, 'geometry': {'type': 'Point', 'coordinates': [-86.5935516357422, 36.10736936266137]}}]}
+
+
     fire_stations= gpd.sjoin(fire_stations, grids, how='inner', predicate='within')
     L=list(grids['cell_id'])
     X_exist= list(fire_stations['cell_id'])
 
     E = list(range(len(incidents)))
-    a= joblib.load("data/a_sub.pkl")
-    d= joblib.load("data/first_half_by_i.pkl")
+    # a= joblib.load("data/a_sub.pkl")
+    # d= joblib.load("data/first_half_by_i.pkl")
     # assignments
-    m, X, Y, b = add_p_via_mip_multi(E,L,a,d,X_exist,p_add=0, alpha=0)
-    sol_X_vals,sol_Y_assign=save_p_median_solution( X, Y, E, L)
+    m, X, Y, b = add_p_via_mip_multi(L,L,a_density,d_dist,X_exist,p_add=0, alpha=0)
+    sol_X_vals,sol_Y_assign=save_p_median_solution( X, Y, L, L)
     sol_X_vals.reset_index(inplace=True,names='location')
     sol_X = fill_solution_X(sol_X_vals, grids, fire_stations)
     sol_X= gpd.GeoDataFrame(sol_X, geometry='geometry')
     sol_X.crs= 'EPSG:4326'
-    sol_Y= compute_nearest_assignments(sol_Y_assign, incidents, sol_X)
-    sol_Y=sol_Y.sjoin(grids, how='inner', predicate='within')
+    df=pd.merge(pd.merge(incidents,sol_Y_assign, left_on='cell_id', right_on='demand', how='inner'),sol_X,on='location', how='inner',suffixes=('','_fs'))
+    gdf = gpd.GeoDataFrame(df, geometry='geometry', crs='EPSG:4326')
+    # 4) Build incident POINT geometry
 
-    cell_to_station=sol_Y.drop_duplicates(subset=['FacilityName','assigned_cell_id'], keep='first')[['FacilityName','assigned_cell_id']]
-    incident_to_station=sol_Y.drop_duplicates(subset=['demand','FacilityName'], keep='first')[['demand','FacilityName','assigned_cell_id','cell_id']]
-    groups=sol_Y.groupby('FacilityName')
+    # 5) Compute distances
+    gdf['distance'] = gdf.geometry.distance(gdf['geometry_fs'])
+    # 6) Keep nearest per demand
+    gdf = (
+        gdf
+        .sort_values('distance')
+        .drop_duplicates(subset=['incident_id'], keep='first')
+        .sort_values('incident_id')
+        .reset_index(drop=True)
+    )
+    # 7) Drop helpers
+    gdf = gdf.drop(columns=['distance'])
+    incident_to_station=gdf[['incident_id',	'FacilityName',	'cell_id_fs',	'cell_id']]
+    incident_to_station.rename(columns={'cell_id_fs':'assigned_cell_id'}, inplace=True)
+
+    groups=gdf.groupby('FacilityName')
     travel_times={}
+    travel_distances={}
     for name, group in groups:
         travel_time=[]
+        travel_distance=[]
         for i,row in group.iterrows():
-            travel_time.append(min(float(d[row['demand'],row['assigned_cell_id']])*60,25*60))
+            travel_time.append(min(float(d_time[row['demand'],row['cell_id_fs']])*60,25*60))
+            travel_distance.append(float(d_dist[row['demand'],row['cell_id_fs']]))
+            
         travel_times[name]=travel_time
-        
-        
+        travel_distances[name]=travel_distance
     travel_times_df=pd.Series(travel_times, name='travel_times').to_frame()
     travel_times_df.reset_index(inplace=True,names='FacilityName')
+    travel_distances_df=pd.Series(travel_distances, name='travel_distances').to_frame()
+    travel_distances_df.reset_index(inplace=True,names='FacilityName')
     fire_stations=pd.merge(fire_stations, travel_times_df, on='FacilityName', how='left')
-    incident_to_station.rename(columns={'demand':'incident_id'}, inplace=True)
+    fire_stations=pd.merge(fire_stations, travel_distances_df, on='FacilityName', how='left')
     fire_stations.drop(columns=['geometry'], inplace=True)
+
 
     
     # cell_to_station, fire_stations, incident_to_station = get_results(station_data, None, None)
